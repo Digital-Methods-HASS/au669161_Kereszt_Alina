@@ -11,7 +11,7 @@ setwd("~/GitHub/Coding/au669161_Kereszt_Alina")
 pacman::p_load(tidyverse)
 ```
 
-## 1) Exercise 1
+## Exercise 1
 **Use R to figure out how many elements in the vector below are greater than 2 and then tell me what their sum (of the larger than 2 elements) is.**
 
 ```{r}
@@ -30,11 +30,13 @@ sum(rooms[!is.na(rooms) & rooms>2])
 
 There are 12 elements greater than 2 and their sum is 55.
 
-## 2) Exercise 2
+## Exercise 2
 **What type of data is in the 'rooms' vector?**
 ```{r}
 class(rooms)
 ```
+
+It is numeric.
 
 ## Exercise 3
 **Submit the following image to Github: Inside your R Project (.Rproj), install the 'tidyverse' package and use the download.file() and read_csv() function to read the SAFI_clean.csv dataset into your R project as 'interviews' digital object (see instructions in https://datacarpentry.org/r-socialsci/setup.html and 'Starting with Data' section). Take a screenshot of your RStudio interface showing**
@@ -48,9 +50,10 @@ class(rooms)
 **Save the screenshot as an image and put it in your AUID_lastname_firstname repository inside our Github organisation (github.com/Digital-Methods-HASS) or equivalent. Place here the URL leading to the screenshot in your repository.**
 
 ```{r}
-interview 
+interview <- read.csv("SAFI_clean.csv")
 ```
 
+https://github.com/Digital-Methods-HASS/au669161_Kereszt_Alina/blob/main/hw2%20pic.PNG
 
 
 
