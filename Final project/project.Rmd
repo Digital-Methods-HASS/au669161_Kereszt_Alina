@@ -1,0 +1,78 @@
+---
+title: "Final project"
+author: "Alina Kereszt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse, stringr)
+```
+
+
+Data provenance: kaggle.com (https://www.kaggle.com/datasets/jeniagerasimov/ted-talks-info-dataset)
+
+*"TED is a nonprofit devoted to spreading ideas, usually in the form of short, powerful talks (18 minutes or less). TED began in 1984 as a conference where Technology, Entertainment and Design converged, and today covers almost all topics — from science to business to global issues — in more than 100 languages. Meanwhile, independently run TEDx events help share ideas in communities around the world.*
+
+*I enjoy TED talks a lot, they contain important life lessons and often motivate me. So I decided to collect data to analyze it."*
+
+## Dataset preprocessing
+I used OpenRefine (CITE) to do a preliminary processing of the data, seeing as it had some inconsistent variables and some variables contained within other variables.
+
+Load data.
+```{r}
+tedbig <- read.csv("ted.csv")
+
+# for now i'm just taking a lil piece of it bc too slow
+ted <- tedbig[1:100,]
+```
+
+Clean.
+```{r}
+# we don't need the hour-minute-second timestamp for when the video was posted,
+# so i remove it witha  regex
+ted$published_date <- gsub("T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z", "", ted$published_date)
+
+# remove unnecessary columns
+ted <- ted %>% 
+  select(!related_videos) %>% 
+  select(!subtitle_languages) %>% 
+  select(!youtube_video_code)
+
+# if i wanna look at topics, the topics field is a mess... i'm just gonna pull
+# it into its own little dataframe with a little cleaning in case i wanna use
+# it
+ted$topics <- gsub("[[:punct:]]", "", ted$topics)
+ted$topics <- gsub("id[0-9]name", ",", ted$topics)
+ted$topics <- gsub("id[0-9][0-9]name", ",", ted$topics)
+ted$topics <- gsub("id[0-9][0-9][0-9]name", ",", ted$topics)
+ted$topics <- gsub("^.", "", ted$topics)
+
+head(ted)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
