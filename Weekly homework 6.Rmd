@@ -1,0 +1,131 @@
+---
+title: "Weekly homework 6"
+author: "Alina Kereszt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(gapminder)
+```
+
+**Use the gapminder dataset from Week 43 to produce solutions to the three tasks below. Post the .R script or .Rmd and .html in your au##### github repository and link it here.**
+```{r}
+# load data as data frame
+df <- as.data.frame(gapminder)
+```
+
+## Exercise 1
+**Define a defensive function that calculates the Gross Domestic Product of a nation from the data available in the gapminder dataset. You can use the population and GDPpercapita columns for it. Using that function, calculate the GDP of Denmark in the following years: 1967, 1977, 1987, 1997, 2007, and 2017.**
+```{r}
+# define function with necessary variables set to NULL unless otherwise specified
+calc_gdp <- function(data, 
+                     year = NULL, 
+                     country = NULL) {
+  
+  # if "year" is not NULL...
+  if(!is.null(year)) {
+    # subset the data to the specified years
+    data <- data[data$year %in% year, ]
+  }
+  
+  # if "country" is not NULL...
+  if(!is.null(country)) {
+    # subset the data to the specified countries
+    data <- data[data$country %in% country, ]
+  }
+  
+  # find total GDP of country by multiplying the population by the GDP per 
+  # capita
+  gdp <- data$pop * data$gdpPercap
+  
+  # append calculated GDP to subsetted data
+  output <- cbind(data, 
+                  gdp = gdp)
+  
+  # output result
+  return(output)
+}
+
+# run function
+calc_gdp(df, 
+         year = c(1967, 1977, 1987, 1997, 2007, 2017),
+         country = "Denmark")
+# the year 2017 is not contained within the data, so it is not included in the
+# output of the function
+```
+
+# Exercise 2
+**Write a script that loops over each country in the gapminder dataset, tests whether the country starts with a ‘B’ , and prints out whether the life expectancy is smaller than 50, between 50 and 70, or greater than 70. (Hint: remember the grepl function, and review the Control Flow tutorial)**
+```{r}
+# extract unique values
+countries <- unique(df$country)
+
+# loop through countries
+for (i in countries) {
+  
+  ################ TEST B
+  # if the country begins with a B...
+  if (i %in% grep("^B",
+                  countries,
+                  value = TRUE)) {
+    # prepare message
+    b_status = "begins with a B."
+  }
+  
+  # otherwise...
+  else {
+    # prepare message
+    b_status = "does not begin with a B."
+  } 
+  
+  ################ TEST LIFE EXPECTANCY
+  # take mean life expectancy for country
+  life_exp <- mean(df[df$country == i, "lifeExp"])
+  
+  # if life expectancy is lower than 50...
+  if (life_exp < 50) {
+    # prepare message
+    le_status = "less than 50."
+  }
+  
+  # if life expectancy is between 50 and 70...
+  if (life_exp >= 50 && life_exp <= 70) {
+    # prepare message
+    le_status = "between 50 and 70."
+  }
+  
+  # if life expectancy is greater than 70...
+  if (life_exp > 70) {
+    # prepare message
+    le_status = "greater than 70."
+  }
+  
+  # print message
+  print(paste0(i, ' ', b_status, ' The mean life expectancy is ', le_status))
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
