@@ -96,7 +96,7 @@ You can visualize each country's trend separately by adding an extra argument to
 - change the facet "layout" to two columns and three rows so that the trends are easier to see in horizontal layout. 
 
 
-```{r plot-facetted, eval = TRUE, message = FALSE, warning = FALSE, echo = FALSE, results='hide'}
+```{r plot-facetted, eval = TRUE, message = FALSE, warning = FALSE, echo = TRUE, results='hide'}
 ggplot(data = Western_Europe,
        aes(x = Year,
            y = homicides_per_100k,

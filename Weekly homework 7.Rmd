@@ -1,0 +1,261 @@
+---
+title: "Weekly homework 7"
+author: "Alina Kereszt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rvest)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(janitor)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(forcats)
+```
+
+## Task
+Clone the repository at https://github.com/Digital-Methods-HASS/WebscrapingPoliceKillings and depending on your familiarity with R, either
+
+1) adapt the web-scraping example to scrape homicide data from FBI site and produce a meaningful report on how homicide trends evolve around US in relation to this urban unrest
+
+or
+
+2) use the rvest library to scrape data of your interest (football statistics in Wikipedia?, gender representatives in different governments? global population by country in https://www.worldometers.info/world-population/population-by-country/ )
+
+or
+
+3) produce data visualisations that shed light on another interesting aspect of the police killing data
+
+Submit both the .rmd and the rendered .html files to your au###### github repository and paste link here.
+
+## Solution
+One of the consistent contributors to my messed-up sleeping schedule is my propensity for spiraling down into Wikipedia rabbit holes. One of my recent such journeys was about supercentenarians, i.e. people who lived to be significantly older than 100 years. So, I decided to choose task 2) and scrape some data about the oldest people ever to have lived in order to learn a little more than what Wikipedia was offering.
+
+The page that I am interested in contains lists of the verified oldest people ever to have lived, divided by sex. The tables list the 100 oldest women and men. There are 101 men, though, because of the 3 last people having the same age. This means there is data for 201 supercentenarians overall.
+
+The data is valid for 7 November, 2022.
+
+### Scraping the data
+
+```{r scrape}
+# get url
+url <- "https://en.wikipedia.org/wiki/List_of_the_verified_oldest_people"
+
+# get website html
+url_html <- read_html(url)
+
+# extract all table-like objects from html
+table <- url_html %>%
+  html_nodes("table") %>%
+  html_table()
+
+# inspect structure of object
+str(table)
+
+# extract the tables i want
+women <- table[[1]]
+men <- table[[2]]
+```
+
+### Cleaning up the data
+
+```{r clean-up}
+##### Column names are unwieldy.
+# clean up column names
+colnames(women) <- c("rank_sex",
+                     "name",
+                     "birth_date",
+                     "death_date",
+                     "age",
+                     "country")
+colnames(men) <- c("rank_sex",
+                   "name",
+                   "birth_date",
+                   "death_date",
+                   "age",
+                   "country")
+
+##### The data for women and men are in separate tables.
+# create dummy variable for sex
+women$sex <- "F"
+men$sex <- "M"
+
+# merge tables
+df <- rbind(women, men)
+
+##### There are within-cell references to external data.
+# the structure of these is either [1] or [a]
+# regex to replace with nothing
+# i could technically write a function for this, but manually applying it to 
+# all columns takes all of 1 minute...
+df$name <- str_replace_all(df$name,
+                           "\\[\\w+\\]",
+                           "")
+df$birth_date <- str_replace_all(df$birth_date,
+                           "\\[\\w+\\]",
+                           "")
+df$death_date <- str_replace_all(df$death_date,
+                           "\\[\\w+\\]",
+                           "")
+df$age <- str_replace_all(df$age,
+                           "\\[\\w+\\]",
+                           "")
+df$country <- str_replace_all(df$country,
+                           "\\[\\w+\\]",
+                           "")
+
+##### There is a tidier way to indicate which people are still alive.
+# create dummy variable for alive status
+df$status <- "dead"
+df$status[df$death_date == "Living"] <- "alive"
+
+##### I would like to work with the supercentenarians' birth and death years.
+# get years simply by deleting everything else with regex
+df$birth_year <- str_replace_all(df$birth_date,
+                                 "\\d+\\s\\w+\\s",
+                                 "")
+df$death_year <- str_replace_all(df$death_date,
+                                 "\\d+\\s\\w+\\s",
+                                 "")
+
+# death year is NA for those that are alive
+df$death_year[df$death_year == "Living"] <- NA
+
+##### Age is unwieldy to work with.
+# separate into years and days
+df <- df %>% 
+  separate(age, 
+           c("age_year", 
+             "age_days"), 
+           ", ")
+
+# remove text parts with regex
+df$age_year <- str_replace_all(df$age_year,
+                               "\\s\\w+",
+                               "")
+df$age_days <- str_replace_all(df$age_days,
+                               "\\s\\w+",
+                               "")
+
+# ensure encoding
+df$age_year <- as.numeric(df$age_year)
+df$age_days <- as.numeric(df$age_days)
+
+# assuming a year is 365 days, find decimal value of days
+df$age_days <- round(df$age_days / 365, 
+                     2)
+
+# pull age into single variable
+df$age <- df$age_year + df$age_days
+
+# remove unnecessary columns
+df <- df[,-c(5, 6)]
+
+##### The people should be ranked overall, too, not just by sex.
+df <- df %>% 
+  mutate(rank_overall = dense_rank(desc(age)))
+
+##### The proper encoding of variables isn't ensured.
+df$country <- as.factor(df$country)
+df$sex <- as.factor(df$sex)
+df$status <- as.factor(df$status)
+df$birth_year <- as.numeric(df$birth_year)
+df$death_year <- as.numeric(df$death_year)
+
+##### Let's see what the data looks like!
+head(df,
+     n = 10)
+```
+
+### Making some visualizations
+
+```{r age-plot-by-sex}
+ggplot(df,
+       aes(x = rank_sex,
+           y = age,
+           color = sex)) +
+  geom_point(size = 0.75,
+             position = "jitter") + # jitter bc some are the same age
+  ylim(110, 125) +
+  labs(title = "Supercentenarian age by sex",
+       x = "Rank within sex",
+       y = "Age",
+       color = "Sex") +
+  scale_color_manual(values = c("red", 
+                                "blue"), 
+                     labels = c("F", 
+                                "M")) +
+  theme_minimal()
+```
+
+The above plot shows that the oldest verified female supercentenarians are older than the male ones - the verified oldest man ever to have lived only grew to be as old as approximately the 20th oldest woman ever to have lived.
+
+```{r age-plot-by-status}
+ggplot(df,
+       aes(x = rank_overall,
+           y = age,
+           color = status)) +
+  geom_point(size = 0.75,
+             position = 'jitter') + # jitter bc some are the same age
+  ylim(110, 125) +
+  labs(title = "Supercentenarian age by rank and status",
+       x = "Rank",
+       y = "Age",
+       color = "Status") +
+  scale_color_manual(values = c("red", 
+                                "black"), 
+                     labels = c("Alive", 
+                                "Dead")) +
+  theme_minimal()
+```
+
+The above plot shows that most of the verified oldest people ever to have lived have already passed away. Quite a few of them are still alive (and will become even older), but they are not the ultimate record-holders (yet?).
+
+```{r plot_by_birth_year}
+ggplot(df,
+       aes(x = birth_year,
+           fill = status)) +
+  geom_histogram(binwidth = 0.5) + # ensure plotting is by year
+  labs(title = "Supercentenarian age by birth year and status",
+       x = "Birth year",
+       y = "Number of people",
+       fill = "Status") +
+  scale_fill_manual(values = c("red",
+                               "black"), 
+                    labels = c("Alive",
+                               "Dead")) +
+  theme_minimal()
+```
+
+The above plot shows that most of the verified oldest people ever to have lived were born after 1850 - this is likely when record-keeping became sufficiently accurate to verify claims of extremely old age. The supercentenarians that are still alive are, for obvious reasons, towards the end of the distribution.
+
+```{r plot-by-country}
+ggplot(df,
+       aes(x = fct_rev(fct_infreq(country)))) + # reorder x by frequency
+  geom_bar(fill = "black") +
+  coord_flip() + # flip x and y axis for more intuitive plot
+  labs(title = "Supercentenarians by country",
+       x = "Country where the person lived",
+       y = "Number of people",
+       fill = "Status") +
+  theme_minimal()
+```
+
+The above plot shows that the of the 201 oldest people ever to have lived, most were in the USA, Japan and France. This plot does not take into account the countries' population, though, so more data would need to be sourced to see which places have the largest concentration of supercentenarians.
+
+
+
+
+
+
+
+
+
+
+
+
