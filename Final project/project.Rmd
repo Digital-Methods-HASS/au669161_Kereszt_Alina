@@ -17,8 +17,7 @@ Data provenance: kaggle.com (https://www.kaggle.com/datasets/jeniagerasimov/ted-
 
 *I enjoy TED talks a lot, they contain important life lessons and often motivate me. So I decided to collect data to analyze it."*
 
-## Dataset preprocessing
-I used OpenRefine (CITE) to do a preliminary processing of the data, seeing as it had some inconsistent variables and some variables contained within other variables.
+## Load data
 
 Load data.
 ```{r}
@@ -28,17 +27,304 @@ tedbig <- read.csv("ted.csv")
 ted <- tedbig[1:100,]
 ```
 
-Clean.
+Split apart for the separate tasks for easier handling.
 ```{r}
-# we don't need the hour-minute-second timestamp for when the video was posted,
-# so i remove it witha  regex
-ted$published_date <- gsub("T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z", "", ted$published_date)
+summary <- ted %>% 
+  select(page_url,
+         summary)
 
-# remove unnecessary columns
+transcript <- ted %>% 
+  select(page_url,
+         transcript)
+
+ted <- ted %>% 
+  select(!summary) %>% 
+  select(!transcript)
+```
+
+## Clean data
+Remove unnecessary columns.
+```{r}
 ted <- ted %>% 
   select(!related_videos) %>% 
   select(!subtitle_languages) %>% 
   select(!youtube_video_code)
+```
+
+Convert some columns that are already fine to their appropriate class.
+```{r}
+ted$duration <- as.numeric(ted$duration)
+ted$event <- as.factor(ted$event)
+ted$views <- as.numeric(ted$views)
+```
+
+The 'likes' column is numeric. The thousands and millions are indicated with the letters 'K' and 'M'.
+```{r}
+ted$likes2 <- ted$likes # copy
+ted$likes2 <- gsub("[0-9]+", 
+                   "", 
+                   ted$likes2) # remove numbers
+ted$likes2 <- gsub("\\.", 
+                   "", 
+                   ted$likes2) # remove dots
+ted$likes <- gsub("[A-Z]+", 
+                  "", 
+                  ted$likes) # remove letters
+ted$likes2[ted$likes2 == "K"] <- 1000
+ted$likes2[ted$likes2 == "M"] <- 1000000 # convert letters to numbers
+ted$likes <- as.numeric(ted$likes)
+ted$likes2 <- as.numeric(ted$likes2) # convert to numeric
+ted$likes <- ted$likes * ted$likes2 # merge back together
+ted <- ted %>% 
+  select(!likes2) # remove unnecessary column
+```
+
+We don't need the hour-minute-second timestamp for when the video was posted.
+```{r}
+# remove it with regex
+ted$published_date <- gsub("T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z", 
+                           "", 
+                           ted$published_date)
+# convert dates to appropriate class
+ted$published_date <- as.Date(ted$published_date)
+ted$recorded_date <- as.Date(ted$recorded_date)
+```
+
+It might be fun to see how the type of event plays into success. For this, we need to remove the year.
+```{r}
+ted$event_type <- gsub("\\s*\\d{4}",
+                       "",
+                       ted$event) 
+ted$event <- as.factor(ted$event)
+ted$event_type <- as.factor(ted$event_type)
+```
+
+### Fix the information on the speakers
+There are several data points in a single cell in the 'speakers' column. TED talks may have either 1 or 2 speakers. Each speaker is listed within curly brackets, and each speaker's name and occupation is listed as 'name: ..., occupation:...'.
+```{r}
+# split by speaker into 2 columns
+ted <- ted %>% 
+  separate(speakers,
+           c("speaker_1",
+             "speaker_2"),
+           "},{")
+# split by name and occupation into 2 further columns
+ted <- ted %>% 
+  separate(speaker_1, 
+           c("speaker_1_name", 
+             "speaker_1_occupation"), 
+           "occupation")
+ted <- ted %>% 
+  separate(speaker_2, 
+           c("speaker_2_name", 
+             "speaker_2_occupation"), 
+           "occupation")
+```
+
+The newly established speaker name columns need to have some of the punctuation and metadata removed in order to proceed with cleaning.
+```{r}
+ted$speaker_1_name <- gsub("\\[*\\{*\"*\\:*\\,*", 
+                           "", 
+                           ted$speaker_1_name)
+ted$speaker_1_name <- gsub("name", 
+                           "", 
+                           ted$speaker_1_name)
+ted$speaker_2_name <- gsub("\\[*\\{*\"*\\:*\\,*", 
+                           "", 
+                           ted$speaker_2_name)
+ted$speaker_2_name <- gsub("name", 
+                           "", 
+                           ted$speaker_2_name)
+# identify number of speakers in each talk
+ted$speaker_no <- ifelse(is.na(ted$speaker_2_name), 
+                         1, 
+                         2)
+```
+
+For the data frame to be easier to use, I want all the speakers' names and occupations to be in the same column.
+```{r}
+# pivot so that speaker names are in same column
+ted <- ted %>% 
+  pivot_longer(c(speaker_1_name,
+                 speaker_2_name),
+               names_to = "speaker_id_in_group")
+# add proper name
+ted <- ted %>% 
+  rename(speaker_name = value)
+
+# pivot so that speaker occupations are in same column
+ted <- ted %>% 
+  pivot_longer(c(speaker_1_occupation,
+                 speaker_2_occupation),
+               names_to = "speaker_id2")
+# add proper name
+ted <- ted %>% 
+  rename(speaker_occupation = value)
+```
+
+Pivoting via multiple steps results in some duplicate rows, since in the second step, each occupation got pivoted into the row of each name. However, the 'names_to' formed a column which tells me which speaker the given data point refers to, so I can remove NAs (where there is no 2nd speaker) + rows where the data of 2 separate people got pivoted together.
+```{r}
+ted$speaker_id_in_group[str_detect(ted$speaker_id_in_group, "1")] <- 1
+ted$speaker_id_in_group[str_detect(ted$speaker_id_in_group, "2")] <- 2
+ted$speaker_id2[str_detect(ted$speaker_id2, "1")] <- 1
+ted$speaker_id2[str_detect(ted$speaker_id2, "2")] <- 2
+
+ted <- ted[!is.na(ted$speaker_name),]
+ted <- ted[!is.na(ted$speaker_occupation),]
+ted <- ted %>% 
+  filter(speaker_id_in_group == speaker_id2) %>% 
+  select(!speaker_id2)
+```
+
+There are still multiple occupations within each cell of the 'occupation' column. They are separated 3 different ways: with semicolons, with an 'and' and with commas.
+```{r}
+##### SEMICOLON GROUP
+# filter for these talks
+semicolons <- ted %>% 
+  filter(str_detect(speaker_occupation, 
+                    ";"))
+# comma is used to indicate which company speaker works at
+semicolons$speaker_occupation <- gsub(",",
+                                      " of",
+                                      semicolons$speaker_occupation)
+# convert semicolon to comma
+semicolons$speaker_occupation <- gsub(";",
+                                      ",",
+                                      semicolons$speaker_occupation)
+
+##### 'and' GROUP
+# filter for these talks
+and <- ted %>% 
+  filter(str_detect(speaker_occupation, 
+                    "and"))
+# replace
+and$speaker_occupation <- gsub(" and",
+                               ",",
+                               and$speaker_occupation)
+# this needs some manual work because sometimes it turns out nonsense
+and$speaker_occupation[1] <- "Founder of Acumen, CEO of Acumen"
+and$speaker_occupation[2] <- "Neuroscience researcher, cancer researcher"
+
+##### COMMA GROUP
+# filter for everything that is not in these groups
+comma <- ted %>% 
+  filter(str_detect(speaker_occupation, 
+                    ";", 
+                    negate = TRUE) & 
+           str_detect(speaker_occupation, 
+                      "and", 
+                      negate = TRUE))
+rm(ted)
+
+# pull into df
+ted <- rbind(semicolons, and, comma)
+rm(semicolons)
+rm(and)
+rm(comma)
+```
+
+Clean up the column. 
+```{r}
+ted$speaker_occupation <- gsub("\"*\\:*\\}*\\]*",
+                               "",
+                               ted$speaker_occupation)
+```
+
+Upon inspection, however, there is still trouble with some occupations (founder, CEO). FIX THESE.
+
+Split into occupations.
+```{r}
+# find max amount of occupations a speaker has (one more than the number of commas)
+max(str_count(ted$speaker_occupation, ","))
+
+# separate cells by comma
+ted <- ted %>% 
+  separate(speaker_occupation,
+           c("occupation_1",
+             "occupation_2",
+             "occupation_3"),
+           ", ")
+
+ted <- pivot_longer(ted,
+                    c(occupation_1,
+                      occupation_2,
+                      occupation_3),
+                    names_to = "occupation_no")
+ted <- ted %>% 
+  rename(speaker_occupation = value) %>% 
+  select(!occupation_no)
+ted <- ted[!is.na(ted$speaker_occupation),]
+# convert to all lowercase letters
+ted$speaker_occupation <- tolower(ted$speaker_occupation)
+```
+
+### Fix the information on the topics
+Once again, a large amount of information is contained within a single cell.
+```{r}
+# find max amount of topics a talk has by counting closing curly brackets
+max(str_count(ted$topics, "\\}"))
+# separate by topic
+ted <- ted %>% 
+  separate(topics,
+           c("topic_1",
+             "topic_2",
+             "topic_3",
+             "topic_4",
+             "topic_5",
+             "topic_6",
+             "topic_7",
+             "topic_8",
+             "topic_9",
+             "topic_10",
+             "topic_11",
+             "topic_12"),
+           "\\}\\,\\{")
+# pivot topics into single column
+ted <- pivot_longer(ted,
+           c(topic_1,
+             topic_2,
+             topic_3,
+             topic_4,
+             topic_5,
+             topic_6,
+             topic_7,
+             topic_8,
+             topic_9,
+             topic_10,
+             topic_11,
+             topic_12),
+           names_to = "id")
+ted <- ted %>% 
+  rename(topics = value) %>% 
+  select(!id)
+```
+
+Clean up the punctuation and NAs.
+```{r}
+ted$topics <- gsub("\\[*\\{*\"*\\:*\\,*\\}*\\]*",
+                   "",
+                   ted$topics)
+ted$topics <- gsub("id\\d+name",
+                   "",
+                   ted$topics)
+ted <- ted[!is.na(ted$topics),]
+ted$topics <- as.factor(ted$topics)
+```
+
+
+
+
+
+
+
+```{r}
+##### The newly established occupation columns are a mess. The occupations are
+##### listed/separated in 3 different ways. They need to be brought into a 
+##### similar format then separated.
+
+
+
+
 
 # if i wanna look at topics, the topics field is a mess... i'm just gonna pull
 # it into its own little dataframe with a little cleaning in case i wanna use
