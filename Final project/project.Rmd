@@ -6,8 +6,21 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
+# in order to prevent R from bullying me, run this before every session:
+# options("install.lock"=FALSE)
 knitr::opts_chunk$set(echo = TRUE)
-pacman::p_load(tidyverse, stringr)
+pacman::p_load(tidyverse, 
+               stringr, 
+               tidytext, 
+               textdata, 
+               ggwordcloud,  
+               devtools, 
+               readr, 
+               ggplot2,
+               RColorBrewer,
+               viridis)
+# set seed to always get same results
+set.seed(2019)
 ```
 
 
@@ -21,20 +34,20 @@ Data provenance: kaggle.com (https://www.kaggle.com/datasets/jeniagerasimov/ted-
 
 Load data.
 ```{r}
-tedbig <- read.csv("ted.csv")
+ted <- read.csv("ted.csv")
 
 # for now i'm just taking a lil piece of it bc too slow
-ted <- tedbig[1:100,]
+# ted <- tedbig[1:100,]
 ```
 
-Split apart for the separate tasks for easier handling.
+Split apart for the separate tasks for easier handling (it freezes otherwise).
 ```{r}
 summary <- ted %>% 
   select(page_url,
          summary)
 
 transcript <- ted %>% 
-  select(page_url,
+  select(X_id,
          transcript)
 
 ted <- ted %>% 
@@ -42,7 +55,7 @@ ted <- ted %>%
   select(!transcript)
 ```
 
-## Clean data
+## Clean 'ted' dataframe
 Remove unnecessary columns.
 ```{r}
 ted <- ted %>% 
@@ -58,7 +71,7 @@ ted$event <- as.factor(ted$event)
 ted$views <- as.numeric(ted$views)
 ```
 
-The 'likes' column is numeric. The thousands and millions are indicated with the letters 'K' and 'M'.
+The 'likes' column is not numeric. The thousands and millions are indicated with the letters 'K' and 'M'.
 ```{r}
 ted$likes2 <- ted$likes # copy
 ted$likes2 <- gsub("[0-9]+", 
@@ -90,12 +103,50 @@ ted$published_date <- as.Date(ted$published_date)
 ted$recorded_date <- as.Date(ted$recorded_date)
 ```
 
-It might be fun to see how the type of event plays into success. For this, we need to remove the year.
+It might be fun to see how the type of event plays into success. 
 ```{r}
+# remove years
 ted$event_type <- gsub("\\s*\\d{4}",
                        "",
-                       ted$event) 
-ted$event <- as.factor(ted$event)
+                       ted$event)
+
+# identify TEDx events and pull them together
+ted$event_type[str_detect(ted$event_type, "TEDx")] <- "TEDx"
+
+# identify TED Salon events and pull them together
+ted$event_type[str_detect(ted$event_type, "Salon")] <- "TEDSalon"
+
+# identify regular TED events and pull them together
+ted$event_type[str_detect(ted$event_type, "@")] <- "TED"
+ted$event_type[ted$event_type == "TED "] <- "TED"
+ted$event_type[ted$event_type == "TEDIndia"] <- "TED"
+ted$event_type[ted$event_type == "TEDNYC"] <- "TED"
+ted$event_type[ted$event_type == "TEDMonterey"] <- "TED"
+ted$event_type[ted$event_type == "TEDLagos Ideas Search"] <- "TED"
+ted$event_type[ted$event_type == "TEDNairobi Ideas Search"] <- "TED"
+
+# identify TED-Ed events and pull them together
+ted$event_type[str_detect(ted$event_type, "TED-Ed")] <- "TED-Ed"
+ted$event_type[ted$event_type == "TED Talks Education"] <- "TED-Ed"
+
+# identify TED Global events and pull them together
+ted$event_type[str_detect(ted$event_type, "Global")] <- "TEDGlobal"
+
+# identify other TED events and pull them together
+ted$event_type[str_detect(ted$event_type, "TED ")] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDGlobal"] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDSalon"] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDMED"] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDWomen"] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDActive"] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDYouth"] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDCity2.0"] <- "Other TED event"
+ted$event_type[ted$event_type == "TEDSummit"] <- "Other TED event"
+
+# identify events that don't run under "TED" and pull them together
+ted$event_type[str_detect(ted$event_type, "TED", negate = TRUE)] <- "Other non-TED event"
+
+unique(ted$event_type)
 ted$event_type <- as.factor(ted$event_type)
 ```
 
@@ -139,6 +190,7 @@ ted$speaker_2_name <- gsub("name",
 ted$speaker_no <- ifelse(is.na(ted$speaker_2_name), 
                          1, 
                          2)
+ted$speaker_no <- as.factor(ted$speaker_no)
 ```
 
 For the data frame to be easier to use, I want all the speakers' names and occupations to be in the same column.
@@ -164,10 +216,14 @@ ted <- ted %>%
 
 Pivoting via multiple steps results in some duplicate rows, since in the second step, each occupation got pivoted into the row of each name. However, the 'names_to' formed a column which tells me which speaker the given data point refers to, so I can remove NAs (where there is no 2nd speaker) + rows where the data of 2 separate people got pivoted together.
 ```{r}
-ted$speaker_id_in_group[str_detect(ted$speaker_id_in_group, "1")] <- 1
-ted$speaker_id_in_group[str_detect(ted$speaker_id_in_group, "2")] <- 2
-ted$speaker_id2[str_detect(ted$speaker_id2, "1")] <- 1
-ted$speaker_id2[str_detect(ted$speaker_id2, "2")] <- 2
+ted$speaker_id_in_group[str_detect(ted$speaker_id_in_group, 
+                                   "1")] <- 1
+ted$speaker_id_in_group[str_detect(ted$speaker_id_in_group, 
+                                   "2")] <- 2
+ted$speaker_id2[str_detect(ted$speaker_id2, 
+                           "1")] <- 1
+ted$speaker_id2[str_detect(ted$speaker_id2, 
+                           "2")] <- 2
 
 ted <- ted[!is.na(ted$speaker_name),]
 ted <- ted[!is.na(ted$speaker_occupation),]
@@ -178,61 +234,24 @@ ted <- ted %>%
 
 There are still multiple occupations within each cell of the 'occupation' column. They are separated 3 different ways: with semicolons, with an 'and' and with commas.
 ```{r}
-##### SEMICOLON GROUP
-# filter for these talks
-semicolons <- ted %>% 
-  filter(str_detect(speaker_occupation, 
-                    ";"))
-# comma is used to indicate which company speaker works at
-semicolons$speaker_occupation <- gsub(",",
-                                      " of",
-                                      semicolons$speaker_occupation)
-# convert semicolon to comma
-semicolons$speaker_occupation <- gsub(";",
-                                      ",",
-                                      semicolons$speaker_occupation)
-
-##### 'and' GROUP
-# filter for these talks
-and <- ted %>% 
-  filter(str_detect(speaker_occupation, 
-                    "and"))
-# replace
-and$speaker_occupation <- gsub(" and",
-                               ",",
-                               and$speaker_occupation)
-# this needs some manual work because sometimes it turns out nonsense
-and$speaker_occupation[1] <- "Founder of Acumen, CEO of Acumen"
-and$speaker_occupation[2] <- "Neuroscience researcher, cancer researcher"
-
-##### COMMA GROUP
-# filter for everything that is not in these groups
-comma <- ted %>% 
-  filter(str_detect(speaker_occupation, 
-                    ";", 
-                    negate = TRUE) & 
-           str_detect(speaker_occupation, 
-                      "and", 
-                      negate = TRUE))
-rm(ted)
-
-# pull into df
-ted <- rbind(semicolons, and, comma)
-rm(semicolons)
-rm(and)
-rm(comma)
-```
-
-Clean up the column. 
-```{r}
+# turn semicolons and "and"s into commas
 ted$speaker_occupation <- gsub("\"*\\:*\\}*\\]*",
                                "",
                                ted$speaker_occupation)
+ted$speaker_occupation <- gsub(";",
+                               ",",
+                               ted$speaker_occupation)
+ted$speaker_occupation <- gsub(" and",
+                               ",",
+                               ted$speaker_occupation)
 ```
 
-Upon inspection, however, there is still trouble with some occupations (founder, CEO). FIX THESE.
+Upon inspection, however, there is still trouble with the occupation CEO as the data also includes the company they founded. For simplicity, let's just assign all these people to simply be "CEO"
+```{r}
+ted$speaker_occupation[str_detect(ted$speaker_occupation, "CEO")] <- "CEO"
+```
 
-Split into occupations.
+Split occupations into 1 data point per cell.
 ```{r}
 # find max amount of occupations a speaker has (one more than the number of commas)
 max(str_count(ted$speaker_occupation, ","))
@@ -254,8 +273,13 @@ ted <- ted %>%
   rename(speaker_occupation = value) %>% 
   select(!occupation_no)
 ted <- ted[!is.na(ted$speaker_occupation),]
-# convert to all lowercase letters
+
+# convert to all lowercase letters except CEO
 ted$speaker_occupation <- tolower(ted$speaker_occupation)
+ted$speaker_occupation[str_detect(ted$speaker_occupation, "ceo")] <- "CEO"
+
+# fix encoding
+ted$speaker_occupation <- as.factor(ted$speaker_occupation)
 ```
 
 ### Fix the information on the topics
@@ -308,57 +332,372 @@ ted$topics <- gsub("id\\d+name",
                    "",
                    ted$topics)
 ted <- ted[!is.na(ted$topics),]
+ted$topics <- tolower(ted$topics)
 ted$topics <- as.factor(ted$topics)
+ted <- ted %>% 
+  filter(str_detect(topics, 
+                    "TED",
+                    negate = TRUE))
 ```
 
-
-
-
-
-
-
+### Summarise videos
 ```{r}
-##### The newly established occupation columns are a mess. The occupations are
-##### listed/separated in 3 different ways. They need to be brought into a 
-##### similar format then separated.
-
-
-
-
-
-# if i wanna look at topics, the topics field is a mess... i'm just gonna pull
-# it into its own little dataframe with a little cleaning in case i wanna use
-# it
-ted$topics <- gsub("[[:punct:]]", "", ted$topics)
-ted$topics <- gsub("id[0-9]name", ",", ted$topics)
-ted$topics <- gsub("id[0-9][0-9]name", ",", ted$topics)
-ted$topics <- gsub("id[0-9][0-9][0-9]name", ",", ted$topics)
-ted$topics <- gsub("^.", "", ted$topics)
-
-head(ted)
-
-
+summary <- ted %>% 
+  select(X_id,
+         page_url,
+         title) %>% 
+  unique()
+nrow(summary)
 ```
 
 
+## Clean and explore 'transcript' dataframe
+The transcripts are mostly fine, but they include mentions of e.g. music or applause within parentheses. These should be removed, as they are parts of the environment, not of the contents of the TED talk itself. I will also remove numbers.
+```{r}
+transcript$transcript <- gsub("\\(\\D*\\)\\s",
+                              "",
+                              transcript$transcript)
+
+transcript$transcript <- gsub("\\d+\\s*\\,*\\.*",
+                              "",
+                              transcript$transcript)
+```
 
 
+The sentiment analysis tools that we were introduced to take individual words for analysis, so we need to tokenize them.
+```{r}
+tr_token <- transcript %>% 
+  unnest_tokens(word, 
+                transcript)
+```
+
+We need to remove the words we aren't particularly interested in using a stopword list.
+```{r}
+tr_stop <- tr_token %>% 
+  anti_join(stop_words)
+```
+
+What are the most common words?
+```{r}
+common_words <- tr_stop %>% 
+  count(word) %>% 
+  arrange(-n)
+common_words$word <- with(common_words, reorder(word, n))
+
+top20 <- ggplot(head(common_words, 
+                     20), 
+       aes(x = word, 
+           y = n, 
+           fill = word, 
+           label = n)) +
+  geom_bar(stat="identity", 
+           show.legend = FALSE) +
+  coord_flip() +
+  scale_fill_viridis(option = "cividis", 
+                     discrete = TRUE) +
+  ylim(0, 32000) + 
+  labs(title = "Top 20 most used words in TED-talks", 
+       x = "Word", 
+       y = "Word Count") +
+  geom_label(aes(fill = word),
+             colour = "white", 
+             fontface = "bold",
+             size = 2.5,
+             show.legend = FALSE) +
+  theme_minimal()
+top20
+
+ggsave(
+  filename = "top20.png",
+  plot = top20,
+  device = "png",
+  width = 150,
+  height = 100,
+  units = "mm")
+```
+
+Let's see a word cloud of the 50 most common terms in TED talks!
+```{r}
+# extract 50 most common words
+top_50 <- common_words %>% 
+  head(50) %>% 
+  # give all words a random angle
+  mutate(angle = 90 * sample(c(0, 1), 
+                             n(), 
+                             replace = TRUE, 
+                             prob = c(50, 
+                                      50)))
+
+# plot as word cloud
+top50 <- ggplot(top_50, 
+       aes(label = word,
+           size = n,
+           angle = angle,
+           color = word)) +
+  geom_text_wordcloud(eccentricity = 1) +
+  scale_radius(range = c(3, 
+                         30), 
+               limits = c(0, 
+                          NA)) +
+  scale_color_viridis(option = "cividis",
+                      discrete = TRUE) +
+  theme_minimal()
+
+ggsave(
+  filename = "top50.png",
+  plot = top50,
+  device = "png",
+  width = 150,
+  height = 100,
+  units = "mm")
+```
 
 
+## Sentiment analysis
+Load sentiment lexicons being used.
+```{r}
+##### AFINN
+# load sentiment lexicon the normal way
+afinn <- get_sentiments(lexicon = "afinn")
+
+##### NRC
+# load sentiment lexicon manually as it is being non-cooperative (allows me
+# neither to download nor load)
+nrc <- read.csv("nrc.txt",
+                sep = "\t",
+                header = FALSE)
+
+# fix column names
+colnames(nrc) <- c("word",
+                   "emotion", 
+                   "value")
+
+# pivot wider for easier use
+nrc <- nrc %>% 
+  pivot_wider(names_from = emotion) %>% 
+  select(!positive) %>% 
+  select(!negative)
+```
+
+Pull together data with sentiment lexicons.
+```{r}
+# positive and negative emotions as per AFINN
+ted_pos_neg <- left_join(tr_stop,
+                         afinn)
+# types of emotions as per NRC
+ted_emotion <- left_join(tr_stop,
+                         nrc)
+```
+
+First, I want to see how positively or negatively sentimented a talk is at the beginning, middle and end. Is there a pattern to it?
+```{r}
+not_na <- ted_pos_neg %>% 
+  filter(!is.na(value))
+not_na$X_id <- as.factor(not_na$X_id)
+
+out <- data.frame()
+
+for (i in levels(not_na$X_id)) {
+  
+  df <- not_na %>% 
+    filter(X_id == i)
+  
+  length <- nrow(df)
+  
+  word_number <- 1:length
+  
+  word_position <- word_number / max(word_number)
+  
+  df <- cbind(df, word_position)
+  
+  out <- rbind(out, df)
+}
+
+# bin into 10 quantiles so that we can compare sentiment in the talks regardless 
+# of duration
+out$bins <- cut(out$word_position,
+                breaks = seq(0, 
+                             1, 
+                             0.1),
+                labels = seq(1,
+                             10,
+                             1))
 
 
+mean_sentiment_by_position <- out %>% 
+  group_by(X_id, 
+           bins) %>% 
+  summarize(sentiment = mean(value))
+mean_sentiment_by_position$bins <- as.numeric(mean_sentiment_by_position$bins)
+mean_sentiment_by_position$X_id <- as.numeric(mean_sentiment_by_position$X_id)
+mean_sentiment_by_position$X_id <- as.factor(mean_sentiment_by_position$X_id)
+
+positivity <- ggplot(mean_sentiment_by_position,
+       aes(x = bins,
+           y = sentiment)) +
+  geom_smooth(color = "blue",
+              fill = "blue",
+              alpha = 0.1) +
+  scale_x_continuous(breaks = c(1:10),
+                     labels = NULL) +
+  labs(title = "Positivity of sentiment in beginning, middle and end of TED-talks",
+       x = "Time",
+       y = "Sentiment") +
+  theme_minimal()
+
+positivity
+
+ggsave(
+  filename = "positivity.png",
+  plot = positivity,
+  device = "png",
+  width = 150,
+  height = 100,
+  units = "mm")
+```
+
+Which emotion is most prevalent in TED-talks?
+```{r}
+# it is enough to filter for emotions in one word, because a word is always 
+# rated for all emotions
+ted_emotion <- ted_emotion %>% 
+  filter(!is.na(anger))
+
+by_sentiment <- ted_emotion %>%
+  pivot_longer(cols = anger:trust,
+               names_to = "emotion") %>% 
+  mutate(emotion = as.factor(emotion)) %>% 
+  group_by(emotion) %>% 
+  summarize(count = sum(value))
+
+by_sentiment$emotion <- with(by_sentiment, reorder(emotion, -count))
+
+emotions <- ggplot(by_sentiment,
+       aes(x = emotion,
+           y = count,
+           fill = emotion)) +
+  geom_bar(stat = 'identity',
+           show.legend = FALSE) +
+  scale_fill_viridis(option = "cividis",
+                     discrete = TRUE,
+                     direction = -1) +
+  labs(title = "Most common emotions present in TED-talks",
+       x = NULL,
+       y = "Number of words indicating emotion",
+       fill = "Emotion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+ggsave(
+  filename = "emotions.png",
+  plot = emotions,
+  device = "png",
+  width = 150,
+  height = 100,
+  units = "mm")
+```
+
+What are the most popular topics? Which topics generate the most views per video? per video?
+```{r}
+topics <- ted %>% 
+  group_by(topics) %>% 
+  summarise(n = n(),
+            views = sum(views)) %>% 
+  arrange(-n) %>% 
+  mutate(views_by_video = round(views / n, 0))
+
+topics$topics <- with(topics, 
+                      reorder(topics, 
+                              -n))
+topics_n <- ggplot(head(topics,
+            10),
+       aes(x = topics,
+           y = n,
+           fill = topics)) +
+  geom_bar(stat = 'identity',
+           show.legend = FALSE) +
+  scale_fill_viridis(option = "cividis",
+                     discrete = TRUE,
+                     direction = -1) +
+  labs(title = "Most popular topics by number of videos",
+       x = NULL,
+       y = "Number of videos") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 
 
+topics$topics <- with(topics, 
+                      reorder(topics, 
+                              -views_by_video))
+topics_view <- ggplot(head(topics,
+            10),
+       aes(x = topics,
+           y = views_by_video,
+           fill = topics)) +
+  geom_bar(stat = 'identity',
+           show.legend = FALSE) +
+  scale_fill_viridis(option = "cividis",
+                     discrete = TRUE,
+                     direction = -1) +
+  labs(title = "Most popular topics by average number of views",
+       x = NULL,
+       y = "Average number of views") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 
+ggsave(
+  filename = "topics_n.png",
+  plot = topics_n,
+  device = "png",
+  width = 150,
+  height = 100,
+  units = "mm")
+ggsave(
+  filename = "topics_view.png",
+  plot = topics_view,
+  device = "png",
+  width = 150,
+  height = 100,
+  units = "mm")
+```
 
+Are videos from specific types of events more popular than others?
+```{r}
+events <- ted %>% 
+  select(X_id,
+         event_type,
+         views) %>% 
+  unique() %>% 
+  group_by(event_type) %>% 
+  summarise(mean_views = mean(views))
 
+events$event_type <- with(events, reorder(event_type, -mean_views))
 
+events <- ggplot(events,
+       aes(x = event_type,
+           y = mean_views,
+           fill = event_type)) +
+  geom_bar(stat = 'identity',
+           show.legend = FALSE) +
+  scale_fill_viridis(option = "cividis",
+                     discrete = TRUE,
+                     direction = -1) +
+  labs(title = "Average view count by event type",
+       x = NULL,
+       y = "Average number of views") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, 
+                                   hjust = 1, 
+                                   vjust = 1))
 
-
-
-
-
-
+ggsave(
+  filename = "events.png",
+  plot = events,
+  device = "png",
+  width = 150,
+  height = 100,
+  units = "mm")
+```
 
 
 
